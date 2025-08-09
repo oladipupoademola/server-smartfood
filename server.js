@@ -12,9 +12,26 @@ const orderRoutes = require("./routes/orderRoutes");
 
 const app = express();
 
-// CORS
-const allowedOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
-app.use(cors({ origin: allowedOrigin, credentials: true }));
+/**
+ * CORS
+ * - Allows localhost during dev
+ * - Allows your Vercel URL in production via FRONTEND_ORIGIN
+ * - Handles credentials (cookies) safely
+ */
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_ORIGIN, // e.g. https://client-smartfood.vercel.app
+].filter(Boolean);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow non-browser requests (e.g., Postman) or same-origin
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+}));
 
 // Middleware
 app.use(express.json());
@@ -27,10 +44,10 @@ app.use("/api/vendors", vendorRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/orders", orderRoutes);
 
-// Root route
+// Health check
 app.get("/", (_req, res) => res.send("🍽️ SmartFood API is running..."));
 
-// 404 handler
+// 404
 app.use((req, res) => res.status(404).json({ message: "🔍 Route not found" }));
 
 // Global error handler
@@ -41,7 +58,11 @@ app.use((err, req, res, next) => {
 
 // DB + start
 mongoose
-  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .connect(process.env.MONGO_URI, {
+    // (these options are harmless if using Mongoose v6+)
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
   .then(() => {
     console.log("✅ MongoDB connected successfully");
     const PORT = process.env.PORT || 5000;

@@ -12,68 +12,66 @@ const orderRoutes = require("./routes/orderRoutes");
 
 const app = express();
 
-/**
- * CORS
- * - Supports local dev & production Vercel URL
- * - Uses FRONTEND_ORIGIN from env
- * - Allows credentials
- */
+// If behind a proxy (Render/Heroku), keep secure cookies/HTTPS flags accurate
+app.set("trust proxy", 1);
+
+// ----- CORS -----
+const isDev = process.env.NODE_ENV !== "production";
+
 const allowedOrigins = [
   "http://localhost:5173",
-  process.env.FRONTEND_ORIGIN // e.g., https://client-smartfood.vercel.app
+  "http://localhost:5174",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
+  process.env.FRONTEND_ORIGIN, // e.g. https://client-smartfood.vercel.app
 ].filter(Boolean);
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests without an origin (e.g., mobile apps, Postman)
-      if (!origin) return callback(null, true);
+// In dev: be permissive (reflect origin) to avoid preflight issues.
+// In prod: allow only known origins.
+const corsOptions = isDev
+  ? { origin: true, credentials: true, optionsSuccessStatus: 204 }
+  : {
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true); // Postman/cURL
+        cb(null, allowedOrigins.includes(origin));
+      },
+      credentials: true,
+      optionsSuccessStatus: 204,
+    };
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      } else {
-        return callback(new Error(`CORS blocked for origin: ${origin}`));
-      }
-    },
-    credentials: true,
-  })
-);
+app.use(cors(corsOptions)); // handles preflights too
+// Do NOT add app.options("*", ...) with path-to-regexp v6
 
-// Middleware
-app.use(express.json());
+// ----- Middleware -----
+app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use("/uploads", express.static("uploads"));
 
-// Routes
+// ----- Routes -----
 app.use("/api/auth", authRoutes);
 app.use("/api/vendors", vendorRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/orders", orderRoutes);
 
-// Health check
+// ----- Health -----
 app.get("/", (_req, res) => res.send("🍽️ SmartFood API is running..."));
 
-// 404 handler
+// ----- 404 -----
 app.use((req, res) => res.status(404).json({ message: "🔍 Route not found" }));
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error("💥 Server Error:", err.stack);
+// ----- Global error handler -----
+app.use((err, req, res, _next) => {
+  console.error("💥 Server Error:", err.stack || err);
   res.status(500).json({ message: "Something went wrong!" });
 });
 
-// DB connection + start server
+// ----- DB + start -----
 mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
+  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
     console.log("✅ MongoDB connected successfully");
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () =>
-      console.log(`🚀 Server is running on port ${PORT}`)
-    );
+    app.listen(PORT, () => console.log(`🚀 Server is running on port ${PORT}`));
   })
   .catch((err) => {
     console.error("❌ MongoDB connection failed:", err.message);

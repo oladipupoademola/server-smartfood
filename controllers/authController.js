@@ -1,51 +1,76 @@
+// controllers/authController.js
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+const JWT_SECRET = process.env.JWT_SECRET || "";
+const JWT_EXPIRES_IN = "7d";
+
+const signToken = (user) =>
+  jwt.sign({ _id: user._id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    let { name, email, password, role = "user" } = req.body || {};
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email and password are required" });
+    }
 
-    const existing = await User.findOne({ email });
-    if (existing) return res.status(400).json({ message: "Email already in use" });
+    email = String(email).toLowerCase().trim();
+    name = String(name).trim();
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ name, email, password: hashedPassword, role });
+    const exists = await User.findOne({ email });
+    if (exists) return res.status(409).json({ message: "Email already in use" });
 
-    await user.save();
+    const hashed = await bcrypt.hash(String(password), 10);
 
-    res.status(201).json({ message: "Registration successful" });
+    await User.create({
+      name,
+      email,
+      password: hashed,
+      role, // "user" | "vendor" | "admin" (validated by schema enum)
+    });
+
+    // Frontend expects just a success message and then navigates to /login
+    return res.status(201).json({ message: "Registration successful" });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("Register error:", err);
+    return res.status(500).json({ message: "Server error during registration" });
   }
 };
 
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    if (!JWT_SECRET) {
+      console.error("Missing JWT_SECRET in environment");
+      return res.status(500).json({ message: "Server misconfiguration" });
+    }
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: "User not found" });
+    let { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
 
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(400).json({ message: "Invalid password" });
+    email = String(email).toLowerCase().trim();
 
-    const token = jwt.sign(
-      { _id: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    // password is select:false in the model — opt-in here
+    const user = await User.findOne({ email }).select("+password");
+    if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
-    res.json({
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      token,
-    });
+    const ok = await bcrypt.compare(String(password), user.password || "");
+    if (!ok) return res.status(401).json({ message: "Invalid credentials" });
+
+    const token = signToken(user);
+    const safeUser = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    };
+
+    return res.json({ token, user: safeUser });
   } catch (err) {
-    res.status(500).json({ message: "Login error", error: err.message });
+    console.error("Login error:", err);
+    return res.status(500).json({ message: "Server error during login" });
   }
 };

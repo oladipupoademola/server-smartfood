@@ -12,10 +12,12 @@ const userSchema = new mongoose.Schema(
       required: true,
       unique: true,
       lowercase: true,
+      trim: true,
     },
     password: {
       type: String,
       required: true,
+      select: false, // ✅ hides password by default
     },
     role: {
       type: String,
@@ -25,5 +27,13 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Optional: ensure email is always lowercase before save
+userSchema.pre("save", function (next) {
+  if (this.isModified("email") && this.email) {
+    this.email = this.email.toLowerCase().trim();
+  }
+  next();
+});
 
 module.exports = mongoose.model("User", userSchema);
